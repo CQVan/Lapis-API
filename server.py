@@ -1,6 +1,7 @@
 import select
 import socket
 import runpy
+from datetime import datetime
 
 from server_types import ServerConfig, Request
 
@@ -27,12 +28,15 @@ class Server:
                 readable, _, _ = select.select([self.s], [], [], 0.1)
                 if self.s in readable:
 
-                    client, (returnIP, returnPort) = self.s.accept()
-                    data = client.recv(4096)
+                    client, (return_ip, _) = self.s.accept()
+                    data = client.recv(self.cfg.max_payload)
+
+                    current_datetime = datetime.now()
+                    current_time = current_datetime.strftime("%H:%M:%S")
 
                     request : Request = Request(data=data)
 
-                    print(f"{request.method} {request.base_url} {returnIP}")
+                    print(f"{current_time} {request.method} {request.base_url} {return_ip}")
 
         except KeyboardInterrupt:
             pass
