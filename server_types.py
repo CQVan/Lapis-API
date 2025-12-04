@@ -8,8 +8,6 @@ class ServerConfig:
     max_request_size : int = 4096
     server_name : str = "Server"
 
-from http import HTTPStatus
-
 class Response:
     def __init__(self, 
                  status_code : int | HTTPStatus = HTTPStatus.OK, 
