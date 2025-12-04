@@ -8,24 +8,37 @@ class ServerConfig:
     max_request_size : int = 4096
     server_name : str = "Server"
 
+from http import HTTPStatus
+
 class Response:
-    status_code : HTTPStatus = 100
-    protocol : str = 'HTTP/1.1'
-    cookies : dict[str, any] = {}
-    headers : dict[str, any] = {}
-    body : str = ""
+    def __init__(self, 
+                 status_code : int | HTTPStatus = HTTPStatus.OK, 
+                 protocol : str = 'HTTP/1.1', 
+                 headers : dict[str, any] = None, 
+                 cookies : dict[str, any] = None, 
+                 body : str = ""):
+        self.status_code = status_code if isinstance(status_code, HTTPStatus) else HTTPStatus(status_code)
+        self.protocol = protocol
+        self.headers = headers if headers is not None else {}
+        self.cookies = cookies if cookies is not None else {}
+        self.body = body
 
-    def __init__(self):
-        pass
+    @property
+    def reason_phrase(self):
+        return self.status_code.phrase
 
-    # TODO: Implement
-    def to_bytes(self) -> bytes:
+    def set_cookie(self, key, value):
+        self.cookies[key] = value
 
-        return b"""HTTP/1.1 200 OK\r
-                Content-Type: text/plain\r
-                Content-Length: 13\r
-                \r
-                Hello, world!"""
+    def add_header(self, key, value):
+        self.headers[key] = value
+
+    def to_bytes(self):
+        response_line = f"{self.protocol} {self.status_code.value} {self.reason_phrase}\r\n"
+        headers = "".join(f"{k}: {v}\r\n" for k, v in self.headers.items())
+        cookies = "".join(f"Set-Cookie: {k}={v}\r\n" for k, v in self.cookies.items())
+        return (response_line + headers + cookies + "\r\n" + self.body).encode('utf-8')
+
 
 
 class Request:

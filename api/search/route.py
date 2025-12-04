@@ -1,7 +1,12 @@
-
+from http import HTTPStatus
+import json
 from server_types import Response, Request
 
+async def GET(request : Request) -> Response:
 
-async def GET(request : Request):
+    example_result = {
+        "found": False,
+        "id": "user_id_here"
+    }
 
-    return Response()
+    return Response(status_code=HTTPStatus.ACCEPTED, body=json.dumps(example_result))

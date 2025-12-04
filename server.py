@@ -39,33 +39,49 @@ class Server:
             data = client.recv(self.cfg.max_request_size)
             current_time = datetime.now().strftime("%H:%M:%S")
             request = Request(data=data)
-            print(f"{current_time} {request.method} {request.base_url} {client.getpeername()[0]}")
+            ip, _ = client.getpeername()
+            print(f"{current_time} {request.method} {request.base_url} {ip}")
 
             try:
                 route = runpy.run_path(f"{self.cfg.dir}{request.base_url}\\route.py")
                 if request.method not in route:
-                    raise RuntimeError("Method not found")
+                    raise FileNotFoundError(f"{request.method} method not found")
                 
                 if not inspect.iscoroutinefunction(route[request.method]):
-                    raise RuntimeError("Method is not asynchronous!")
+                    raise RuntimeError("Method function must be asynchronous!")
                 
+                function_sig = inspect.signature(route[request.method])
+                if function_sig.return_annotation is inspect._empty or function_sig.return_annotation is not Response:
+                    raise RuntimeError("Method function must be annotated to return Response")
+
+
                 response : Response = asyncio.run(route[request.method](request))
 
-                client.sendall(response.to_bytes())
+                self.__send_response(client, response)
+
+            except FileNotFoundError:
+                # TODO: send 404 status code
+                response : Response = Response(status_code=404, body="404 Not Found")
+                self.__send_response(client, response)
+                pass
 
             except Exception as e:
-                print(f"Error handling client: {e}")
-
-        except FileNotFoundError:
-            # TODO: send 404 status code
-            response : Response = Response()
-            client.sendall(response.to_bytes())
-            pass
+                print(f"Error handling request: {e}")
+                response = Response(status_code=500, body="Internal Server Error")
+                self.__send_response(client, response)
 
         except Exception as e:
             print(f"Error handling client: {e}")
+            self.__send_response(client, Response(status_code=404, body="404 Not Found"))
+            
         finally:
             client.close()
+
+    def __send_response(self, client : socket.socket, response : Response):
+        client.sendall(response.to_bytes())
+        current_time = datetime.now().strftime("%H:%M:%S")
+        ip, _ = client.getpeername()
+        print(f"{current_time} {response.status_code.value} -> {ip}")
 
     def __close(self):
         if self.s is not None:
