@@ -9,4 +9,4 @@ async def GET(request : Request) -> Response:
         "id": "user_id_here"
     }
 
-    return Response(status_code=HTTPStatus.ACCEPTED, body=json.dumps(example_result))
+    return Response(status_code=200, body=json.dumps(example_result))

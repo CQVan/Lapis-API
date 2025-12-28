@@ -1,19 +1,27 @@
+from http import HTTPMethod
 import select
 import socket
 import asyncio
+import pathlib
 import inspect
 import runpy
-from multiprocessing import Process
+from threading import Thread
 from datetime import datetime
-from server_types import ServerConfig, Request, Response
+from server_types import BadRequest, ServerConfig, Request, Response
 
 class Server:
     s: socket.socket = None
     cfg: ServerConfig = ServerConfig()
 
+    paths: dict = {}
+
     def __init__(self, config: ServerConfig | None = None):
         if config is not None:
             self.cfg = config
+
+        print("Baking Paths...")
+        self.paths = self._bake_paths()
+        print(self.paths)
 
     def run(self, ip: str, port: int):
         self.s = socket.socket()
@@ -26,41 +34,81 @@ class Server:
                 readable, _, _ = select.select([self.s], [], [], 0.1)
                 if self.s in readable:
                     client, _ = self.s.accept()
-                    p = Process(target=self._handle_request, args=(client,))
-                    p.daemon = True
-                    p.start()
+                    t = Thread(target=self._handle_request, args=(client,), daemon=True)
+                    t.start()
         except KeyboardInterrupt:
             pass
         finally:
             self.__close()
 
+
+    def _bake_paths(self) -> dict:
+        # 1. Setup root and script target
+        root = pathlib.Path(self.cfg.dir)
+        script_file_name = f"{self.cfg.path_script_name}.py"
+        result = {}
+
+        # 2. Recursively find all target files (e.g., path.py)
+        for path in root.rglob(script_file_name):
+            if not path.is_file():
+                continue
+
+            # 3. Build/Navigate the nested dictionary based on folder structure
+            parts = path.relative_to(root).parts
+            current_level = result
+            
+            # We iterate through parts[:-1] to navigate folders, not the file itself
+            for part in parts[:-1]:
+                current_level = current_level.setdefault(part, {})
+
+            script_globals = runpy.run_path(str(path.absolute()))
+
+            # Grab just endpoint methods
+            api_routes = {
+                f"/{k}": v 
+                for k, v in script_globals.items() 
+                if k in HTTPMethod
+            }
+
+            # Add endpoints
+            current_level.update(api_routes)
+
+        return result
+
     def _handle_request(self, client: socket.socket):
         try:
             data = client.recv(self.cfg.max_request_size)
             current_time = datetime.now().strftime("%H:%M:%S")
-            request = Request(data=data)
+
+            try:
+                request = Request(data=data)
+            except BadRequest:
+                self.__send_response(client, Response(400, "Bad Request"))
+                return
+
             ip, _ = client.getpeername()
             print(f"{current_time} {request.method} {request.base_url} {ip}")
 
             try:
-                route = runpy.run_path(f"{self.cfg.dir}{request.base_url}\\route.py")
-                if request.method not in route:
-                    raise FileNotFoundError(f"{request.method} method not found")
+
+                path = pathlib.Path(f"{self.cfg.dir}{request.base_url}")
+                parts = path.relative_to(self.cfg.dir).parts
                 
-                if not inspect.iscoroutinefunction(route[request.method]):
-                    raise RuntimeError("Method function must be asynchronous!")
-                
-                function_sig = inspect.signature(route[request.method])
-                if function_sig.return_annotation is inspect._empty or function_sig.return_annotation is not Response:
-                    raise RuntimeError("Method function must be annotated to return Response")
+                leaf = None
+                for part in parts:
+                    leaf = self.paths[part]
 
+                if f"/{request.method}" in leaf:
+                    response : Response = asyncio.run(leaf[f"/{request.method}"](request))
+                    self.__send_response(client, response)
 
-                response : Response = asyncio.run(route[request.method](request))
+                # TODO: Add slugs
+                else:
+                    raise FileNotFoundError()
 
-                self.__send_response(client, response)
+                pass
 
             except FileNotFoundError:
-                # TODO: send 404 status code
                 response : Response = Response(status_code=404, body="404 Not Found")
                 self.__send_response(client, response)
                 pass

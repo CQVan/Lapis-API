@@ -7,6 +7,7 @@ class ServerConfig:
     dir : str = "./api/"
     max_request_size : int = 4096
     server_name : str = "Server"
+    path_script_name : str = "path"
 
 class Response:
     def __init__(self, 
@@ -37,40 +38,42 @@ class Response:
         cookies = "".join(f"Set-Cookie: {k}={v}\r\n" for k, v in self.cookies.items())
         return (response_line + headers + cookies + "\r\n" + self.body).encode('utf-8')
 
-
+class BadRequest(Exception):
+    pass
 
 class Request:
-    method : HTTPMethod
-    headers : dict[str, any] = {}
-    base_url : str
-    protocol : str
+    def __init__(self, data: bytes):
+        try:
+            text = data.decode("iso-8859-1")
+        except UnicodeDecodeError:
+            raise BadRequest("Invalid encoding")
 
-    body : str
-    cookies : dict[str, any] = {}
+        if "\r\n\r\n" not in text:
+            raise BadRequest("Malformed HTTP request")
 
-    query_params : dict[str, any] = {}
+        head, body = text.split("\r\n\r\n", 1)
+        lines = head.split("\r\n")
 
-    def __init__(self, data : bytes):
-        head, self.body = data.decode().split('\r\n\r\n', 1)
-
-        headers = head.splitlines()
-        request_line = headers.pop(0)
-        method, url, self.protocol = request_line.split(' ', 3)
+        method, url, protocol = lines[0].split(" ", 2)
         self.method = HTTPMethod[method.upper()]
 
-        for header in headers:
-            key, value = header.split(':', 1)
+        if protocol not in ("HTTP/1.0", "HTTP/1.1"):
+            raise BadRequest("Unsupported protocol")
 
-            if key == "Cookie":
-                cookies = value.split(';')
-                for cookie in cookies:
-                    ckey, cvalue = cookie.split('=')
-                    self.cookies[ckey.strip()] = cvalue.strip()
+        self.protocol = protocol
+        self.headers = {}
+        self.cookies = {}
 
-            else:
-                self.headers[key] = value.strip()
+        for line in lines[1:]:
+            if ":" not in line:
+                raise BadRequest("Malformed header")
+            key, value = line.split(":", 1)
+            self.headers[key.strip()] = value.strip()
+
+        if protocol == "HTTP/1.1" and "Host" not in self.headers:
+            raise BadRequest("Missing Host header")
 
         parsed = urlparse(url)
         self.base_url = parsed.path
         self.query_params = dict(parse_qsl(parsed.query))
-        pass
+        self.body = body
