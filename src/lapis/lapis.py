@@ -3,13 +3,12 @@ import select
 import socket
 import asyncio
 import pathlib
-import inspect
 import runpy
 from threading import Thread
 from datetime import datetime
 from server_types import BadRequest, ServerConfig, Request, Response
 
-class Server:
+class Lapis:
     s: socket.socket = None
     cfg: ServerConfig = ServerConfig()
 
@@ -155,7 +154,3 @@ class Server:
                 self.s.close()
             except Exception as e:
                 print(f"Error when closing socket: {e}")
-
-if __name__ == "__main__":
-    server = Server()
-    server.run("localhost", 80)
