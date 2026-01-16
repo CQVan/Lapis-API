@@ -1,10 +1,11 @@
 from dataclasses import dataclass
+from typing import Iterator
 from urllib.parse import urlparse, parse_qsl
 from http import HTTPMethod, HTTPStatus
 
 @dataclass
 class ServerConfig:
-    dir : str = "./api/"
+    dir : str = "./api"
     max_request_size : int = 4096
     server_name : str = "Server"
     path_script_name : str = "path"
@@ -12,13 +13,16 @@ class ServerConfig:
 class Response:
     def __init__(self, 
                  status_code : int | HTTPStatus = HTTPStatus.OK, 
+                 body : str = "",
                  protocol : str = 'HTTP/1.1', 
                  headers : dict[str, any] = None, 
                  cookies : dict[str, any] = None, 
-                 body : str = ""):
+                 ):
         self.status_code = status_code if isinstance(status_code, HTTPStatus) else HTTPStatus(status_code)
         self.protocol = protocol
-        self.headers = headers if headers is not None else {}
+        self.headers = headers if headers is not None else {
+            "Content-Type": "text/plain",
+        }
         self.cookies = cookies if cookies is not None else {}
         self.body = body
 
@@ -33,11 +37,29 @@ class Response:
         self.headers[key] = value
 
     def to_bytes(self):
+        body_bytes = self.body.encode('utf-8')
+        if "Content-Length" not in self.headers:
+            self.headers["Content-Length"] = len(body_bytes)
+
         response_line = f"{self.protocol} {self.status_code.value} {self.reason_phrase}\r\n"
         headers = "".join(f"{k}: {v}\r\n" for k, v in self.headers.items())
         cookies = "".join(f"Set-Cookie: {k}={v}\r\n" for k, v in self.cookies.items())
-        return (response_line + headers + cookies + "\r\n" + self.body).encode('utf-8')
 
+        return (response_line + headers + cookies + "\r\n").encode('utf-8') + body_bytes
+
+class StreamedResponse(Response):
+    
+    method : Iterator[str]
+
+    def __init__(self, method : Iterator[str], status_code = HTTPStatus.OK, protocol = 'HTTP/1.1', headers = None, cookies = None, body = ""):
+        super().__init__(status_code, protocol, headers, cookies, body)
+        headers["Cache-Control"] = "no-cache"
+        headers["Connection"] = "keep-alive"
+        headers["Content-Type"] = "text/event-stream"
+
+        self.iterator = method
+    pass
+    
 class BadRequest(Exception):
     pass
 
