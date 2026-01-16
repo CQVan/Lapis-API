@@ -17,7 +17,7 @@ Then within the *api/path.py* file create your first GET api endpoint by adding 
 from lapis import Response, Request
 
 async def GET (req : Request) -> Response:
-    return Response(200, "Hello World!")
+    return Response(status_code=200, body="Hello World!")
 ```
 
 Finally by adding the following code to *main.py* and running it:
