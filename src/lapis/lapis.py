@@ -1,3 +1,9 @@
+"""
+Docstring for lapis.lapis
+
+The main script for the Lapis server handling initial request handling and response
+"""
+
 import select
 import socket
 import asyncio
@@ -112,7 +118,14 @@ class Lapis:
                     if part in leaf:
                         leaf = leaf[part]
                     else:
-                        dynamicRoutes: list[str] = list({k: v for k, v in leaf.items() if k.startswith('[') and k.endswith(']')})
+                        dynamicRoutes: list[str] = list(
+                            {
+                                key
+                                for key in leaf
+                                if key.startswith("[") and key.endswith("]")
+                            }
+                        )
+                        
                         if len(dynamicRoutes) == 1:
                             request.slugs[dynamicRoutes[0].strip("[]")] = part
                             leaf = leaf[dynamicRoutes[0]]
