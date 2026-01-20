@@ -5,4 +5,4 @@ lapis package.
 """
 
 from .lapis import Lapis
-from .server_types import Response, Request, StreamedResponse
+from .protocals.http1 import Request, Response

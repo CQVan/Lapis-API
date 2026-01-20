@@ -12,7 +12,9 @@ import runpy
 import sys
 from threading import Thread
 from datetime import datetime
-from .server_types import BadRequest, ServerConfig, Request, Response
+
+from lapis.protocals.http1 import HTTP1Protocal, Request, Response
+from .server_types import Protocol, ServerConfig
 from http import HTTPMethod
 
 class Lapis:
@@ -20,6 +22,7 @@ class Lapis:
     cfg: ServerConfig = ServerConfig()
 
     paths: dict = {}
+    __protocals : list[type[Protocol]] = []
 
     def __init__(self, config: ServerConfig | None = None):
 
@@ -27,6 +30,7 @@ class Lapis:
             self.cfg = config
 
         self.paths = self._bake_paths()
+        self.register_protocal(HTTP1Protocal)
 
     def run(self, ip: str, port: int):
         self.s = socket.socket()
@@ -45,6 +49,10 @@ class Lapis:
             pass
         finally:
             self.__close()
+
+    def register_protocal(self, protocal : type[Protocol]):
+        self.__protocals.insert(0, protocal)
+        pass
 
     def _get_dynamic_dirs(self, directory: pathlib.Path):
         return [
@@ -97,19 +105,9 @@ class Lapis:
     def _handle_request(self, client: socket.socket):
         try:
             data = client.recv(self.cfg.max_request_size)
-            current_time = datetime.now().strftime("%H:%M:%S")
+            request : Request = Request(data)
 
             try:
-                request = Request(data=data)
-            except BadRequest:
-                self.__send_response(client, Response(400, "Bad Request"))
-                return
-
-            ip, _ = client.getpeername()
-            print(f"{current_time} {request.method} {request.base_url} {ip}")
-
-            try:
-
                 path = pathlib.Path(f"{self.cfg.dir}{request.base_url}")
                 parts : list[str] = path.relative_to(self.cfg.dir).parts
                 
@@ -131,13 +129,17 @@ class Lapis:
                             leaf = leaf[dynamic_routes[0]]
                         else:
                             raise FileNotFoundError()
-                            
 
-                if f"/{request.method}" in leaf:
-                    response : Response = asyncio.run(leaf[f"/{request.method}"](request))
-                    self.__send_response(client, response)
-                else:
-                    raise FileNotFoundError()
+                if len(leaf) == 0:
+                    raise FileExistsError()
+                
+                for p in self.__protocals:
+                    protocal : Protocol = p()
+
+                    if protocal.identify(initial_data=data):
+                        if protocal.handshake(client=client):
+                            protocal.handle(client=client, slugs=request.slugs, endpoints=leaf)
+                    pass
                 
             except FileNotFoundError:
                 response : Response = Response(status_code=404, body="404 Not Found")
