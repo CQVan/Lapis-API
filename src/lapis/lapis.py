@@ -17,10 +17,11 @@ from .server_types import BadRequest, Protocol, ServerConfig
 from http import HTTPMethod
 
 class Lapis:
-    s: socket.socket = None
+
     cfg: ServerConfig = ServerConfig()
 
-    paths: dict = {}
+    __s: socket.socket = None
+    __paths: dict = {}
     __taken_endpoints : list[str] = []
     __protocals : list[type[Protocol]] = []
 
@@ -29,20 +30,20 @@ class Lapis:
         if config is not None:
             self.cfg = config
 
-        self.paths = self._bake_paths()
+        self.__paths = self._bake_paths()
         self.register_protocal(HTTP1Protocal)
 
     def run(self, ip: str, port: int):
-        self.s = socket.socket()
-        self.s.bind((ip, port))
-        self.s.listen()
+        self.__s = socket.socket()
+        self.__s.bind((ip, port))
+        self.__s.listen()
         print(f"Server is now listening on http://{ip}:{port}")
 
         try:
             while True:
-                readable, _, _ = select.select([self.s], [], [], 0.1)
-                if self.s in readable:
-                    client, _ = self.s.accept()
+                readable, _, _ = select.select([self.__s], [], [], 0.1)
+                if self.__s in readable:
+                    client, _ = self.__s.accept()
                     t = Thread(target=self._handle_request, args=(client,), daemon=True)
                     t.start()
         except KeyboardInterrupt:
@@ -116,7 +117,7 @@ class Lapis:
                 path = pathlib.Path(f"{self.cfg.dir}{request.base_url}")
                 parts : list[str] = path.relative_to(self.cfg.dir).parts
                 
-                leaf : dict = self.paths
+                leaf : dict = self.__paths
                 for part in parts:
                     if part in leaf:
                         leaf = leaf[part]
