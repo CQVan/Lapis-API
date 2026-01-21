@@ -76,12 +76,16 @@ class Request:
         if protocol == "HTTP/1.1" and "Host" not in self.headers:
             raise BadRequest("Missing Host header")
 
-        parsed = urlparse(url)
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            raise BadRequest("Bad URL")
+        
         self.base_url = parsed.path
         self.query_params = dict(parse_qsl(parsed.query))
         self.body = body
 
-class HTTP1Protocal(Protocol):
+class HTTP1Protocol(Protocol):
 
     request : Request = None
 

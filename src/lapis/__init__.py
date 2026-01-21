@@ -6,4 +6,4 @@ lapis package.
 
 from .lapis import Lapis
 from .server_types import ServerConfig, Protocol
-from .protocals.http1 import Request, Response
+from .protocols.http1 import Request, Response

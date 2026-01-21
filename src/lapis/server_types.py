@@ -9,8 +9,16 @@ class ServerConfig:
     server_name : str = "Server"
     path_script_name : str = "path"
     
+
+# region Exceptions
+
 class BadRequest(Exception):
     pass
+
+class BadAPIDirectory(Exception):
+    pass
+
+# endregion
 
 class Protocol(ABC):
     """
