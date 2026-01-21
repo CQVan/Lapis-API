@@ -65,12 +65,12 @@ class Lapis:
         finally:
             self.__close()
 
-    def __register_protocol(self, protocol):
+    def __register_protocol(self, protocol : type[Protocol]):
 
         if self.__running:
             raise RuntimeError("Cannot register new Protocol while server is running")
 
-        endpoints : list[str] = protocol.get_target_endpoints()
+        endpoints : list[str] = protocol().get_target_endpoints()
         if bool(set(endpoints) & set(self.__taken_endpoints)):
             raise Exception("Cannot reuse target endpoint method!")
 
@@ -190,7 +190,7 @@ class Lapis:
                 if not protocol.handshake(client=client):
                     break
 
-                target_endpoints = ProtocolCls.get_target_endpoints()
+                target_endpoints = protocol.get_target_endpoints()
 
                 endpoints = { 
                     f"/{k}": leaf[f"/{k}"] 

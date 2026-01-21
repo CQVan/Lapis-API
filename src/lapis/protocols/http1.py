@@ -89,7 +89,7 @@ class HTTP1Protocol(Protocol):
 
     request : Request = None
 
-    def get_target_endpoints() -> list[str]:
+    def get_target_endpoints(self) -> list[str]:
         return [method.name for method in HTTPMethod]
 
     def identify(self, initial_data):

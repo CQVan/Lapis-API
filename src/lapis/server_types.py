@@ -4,6 +4,10 @@ import socket
 
 @dataclass
 class ServerConfig:
+    """
+    The class containing all configuration settings for a Lapis server to operate with
+    """
+
     dir : str = "./api"
     max_request_size : int = 4096
     server_name : str = "Server"
@@ -13,9 +17,15 @@ class ServerConfig:
 # region Exceptions
 
 class BadRequest(Exception):
+    """
+    An Exception raised when a client request is not formatted correctly
+    """
     pass
 
 class BadAPIDirectory(Exception):
+    """
+    An Exception raised when the format of the directory containing all endpoints is incorrect
+    """
     pass
 
 # endregion
@@ -25,14 +35,14 @@ class Protocol(ABC):
     An abstract class used for the server to be able to handle different protocals (ex: HTTP/1.1)
     """
 
-    @classmethod
     @abstractmethod
-    def get_target_endpoints() -> list[str]:
+    def get_target_endpoints(self) -> list[str]:
         '''
         :return: A list of all possible target function names of the protocol
         :rtype: list[str]
         '''
-        pass
+
+        raise NotImplementedError
 
     @abstractmethod
     def identify(self, initial_data: bytes) -> bool:
@@ -44,7 +54,8 @@ class Protocol(ABC):
         :return: If the initial request is for the given protocol
         :rtype: bool
         """
-        pass
+
+        raise NotImplementedError
 
     @abstractmethod
     def handshake(self, client : socket.socket) -> bool:
@@ -56,7 +67,8 @@ class Protocol(ABC):
         :return: If the handshake was successful
         :rtype: bool
         '''
-        pass
+
+        raise NotImplementedError
 
     @abstractmethod
     def handle(self, client : socket.socket, slugs: dict[str, str], endpoints: dict):
@@ -70,4 +82,6 @@ class Protocol(ABC):
         :param endpoints: All endpoints of a given url
         :type endpoints: dict
         '''
-        pass
+
+        raise NotImplementedError
+        
