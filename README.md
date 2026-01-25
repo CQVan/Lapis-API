@@ -1,4 +1,4 @@
-Lapis is a file-based REST API framework inspired by Vercel functions
+Lapis is a file-based REST API framework inspired by Modern Serverless Cloud Services
 
 To create a basic Lapis server, create a folder called *api* and create python script named *path.py*
 then within your main folder create a python script to start the server (we will call this script *main.py* in our example)
