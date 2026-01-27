@@ -2,7 +2,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import socket
 import json
+import sys
 from typing import get_origin, get_type_hints
+import pathlib
 
 @dataclass
 class ServerConfig:
@@ -18,7 +20,7 @@ class ServerConfig:
     protocol_configs : dict[str, dict] = field(default_factory=dict)
 
     @classmethod
-    def from_json(cls, file_path : str) -> "ServerConfig":
+    def from_json(cls, file_path : str | pathlib.Path) -> "ServerConfig":
         """
         Generates a ServerConfig object from the json file found at the file path
         
@@ -28,9 +30,12 @@ class ServerConfig:
         :rtype: ServerConfig
         """
 
+        base_dir = pathlib.Path(sys.argv[0]).parent.resolve()
+        path = (base_dir / file_path).resolve()
+
         config : ServerConfig = ServerConfig()
-        
-        with open(file_path, 'r') as file:
+
+        with open(path, 'r') as file:
             # Read and parse the JSON content from the file
             data = json.load(file)
 
