@@ -1,5 +1,7 @@
+"""
+Module containing the HTTP 1/1.1 protocol implementation for Lapis server
+"""
 
-import asyncio
 from datetime import datetime
 from http import HTTPMethod, HTTPStatus
 import socket
@@ -50,8 +52,8 @@ class Request:
 
         try:
             parsed = urlparse(url)
-        except ValueError:
-            raise BadRequest("Bad URL")
+        except ValueError as exc:
+            raise BadRequest("Bad URL") from exc
         
         self.base_url = parsed.path
         self.query_params = dict(parse_qsl(parsed.query))
@@ -110,8 +112,6 @@ class StreamedResponse(Response):
         cookies = "".join(f"Set-Cookie: {k}={v}\r\n" for k, v in self.cookies.items())
 
         return (response_line + headers + cookies + "\r\n").encode('utf-8')
-
-    pass
 
 class HTTP1Protocol(Protocol):
 
