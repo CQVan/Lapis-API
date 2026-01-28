@@ -6,6 +6,10 @@ import sys
 from typing import get_origin, get_type_hints
 import pathlib
 
+"""
+Module containing all server related types and exceptions
+"""
+
 @dataclass
 class ServerConfig:
     """
@@ -35,7 +39,7 @@ class ServerConfig:
 
         config : ServerConfig = ServerConfig()
 
-        with open(path, 'r') as file:
+        with open(path, 'r', encoding='utf-8') as file:
             # Read and parse the JSON content from the file
             data = json.load(file)
 
@@ -56,7 +60,8 @@ class ServerConfig:
 
         return config
     
-    def _check_type(value, expected_type) -> bool:
+    @classmethod
+    def _check_type(cls, value, expected_type) -> bool:
         """
         Returns if a value is an instance of a type while accounting for generics
         """
@@ -146,4 +151,3 @@ class Protocol(ABC):
         '''
 
         raise NotImplementedError
-        
