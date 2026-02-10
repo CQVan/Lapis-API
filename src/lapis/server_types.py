@@ -103,6 +103,15 @@ class Protocol(ABC):
     """
 
     @abstractmethod
+    def get_config_key(self) -> str:
+        """
+        Gathers the keyword used to get the protocol's config from ServerConfig.protocol_configs
+
+        :return: Description
+        :rtype: str
+        """
+
+    @abstractmethod
     def get_target_endpoints(self) -> list[str]:
         '''
         :return: A list of all possible target function names of the protocol
@@ -138,7 +147,7 @@ class Protocol(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def handle(self, client : socket.socket, slugs: dict[str, str], endpoints: dict):
+    async def handle(self, client : socket.socket, slugs: dict[str, str], endpoints: dict[str, any]):
         '''
         Handles the protocol logic and server to client communication
         
@@ -147,7 +156,7 @@ class Protocol(ABC):
         :param slugs: Any slugs in the url used to reach the endpoints
         :type slugs: dict[str, str]
         :param endpoints: All endpoints of a given url
-        :type endpoints: dict
+        :type endpoints: dict[str, any]
         '''
 
         raise NotImplementedError

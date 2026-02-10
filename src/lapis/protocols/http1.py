@@ -121,6 +121,9 @@ class HTTP1Protocol(Protocol):
 
     request : Request = None
 
+    def get_config_key(self):
+        return "http1.x_config"
+
     def get_target_endpoints(self) -> list[str]:
         return [method.name for method in HTTPMethod]
 
@@ -132,10 +135,15 @@ class HTTP1Protocol(Protocol):
             return False
     
     def handshake(self, client : socket.socket):
-        current_time = datetime.now().strftime("%H:%M:%S")
-        ip, _ = client.getpeername()
-        print(f"{current_time} {self.request.method} {self.request.base_url} {ip}")
-        return True
+        # don't know how this would create an exception but its here just to be safe
+
+        try:
+            current_time = datetime.now().strftime("%H:%M:%S")
+            ip, _ = client.getpeername()
+            print(f"{current_time} {self.request.method} {self.request.base_url} {ip}")
+            return True
+        except:
+            return False
     
     async def handle(self, client : socket.socket, slugs, endpoints):
 

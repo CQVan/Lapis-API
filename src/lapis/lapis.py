@@ -160,6 +160,7 @@ class Lapis:
             return
 
         try:
+            # Digs through api cache map to find the correct endpoint directory
             path = pathlib.Path(f"{self.cfg.api_directory}{request.base_url}")
             parts : list[str] = path.relative_to(self.cfg.api_directory).parts
             
@@ -169,6 +170,7 @@ class Lapis:
                     leaf = leaf[part]
                     continue
                 
+                # checks if there are dynamic routes available
                 dynamic_routes: list[str] = list(
                     {
                         key
@@ -186,6 +188,7 @@ class Lapis:
             if len(leaf) == 0:
                 raise FileExistsError()
             
+            # Finds the correct protocol based on the inital request
             for ProtocolCls in self.__protocols:
                 protocol: Protocol = ProtocolCls()
 
@@ -193,7 +196,7 @@ class Lapis:
                     continue
 
                 if not protocol.handshake(client=client):
-                    break
+                    raise BadRequest()
 
                 target_endpoints = protocol.get_target_endpoints()
 
@@ -217,7 +220,7 @@ class Lapis:
                     )
                 
                 break
-            else:
+            else: # No Protocol was found to be compatible 
                 raise BadRequest()
 
         
