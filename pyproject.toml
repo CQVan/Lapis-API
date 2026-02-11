@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "Lapis"
-version = "0.1.8"
+version = "0.1.9"
 description = "An organized way to create REST APIs"
 readme = "README.md"
 requires-python = ">=3.9"

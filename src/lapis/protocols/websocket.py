@@ -1,7 +1,8 @@
 import asyncio
+from datetime import datetime
 import socket
-from server_types import Protocol
-from http1 import Request, Response
+from lapis.server_types import Protocol
+from lapis.protocols.http1 import Request, Response
 
 import base64
 import hashlib
@@ -20,7 +21,7 @@ class WSOpcode(Enum):
     PING         = 0x9
     PONG         = 0xA
 
-class WSPFrame:
+class WSFrame():
     __data: bytes
 
     def __init__(self, data: bytes):
@@ -47,12 +48,10 @@ class WSPFrame:
 
         if length < 126:
             return length
-
         if length == 126:
             return int.from_bytes(self.__data[2:4], "big")
-
         return int.from_bytes(self.__data[2:10], "big")
-
+    
     def _header_length(self) -> int:
         length = self.__data[1] & 0x7F
 
@@ -80,7 +79,7 @@ class WSPFrame:
         # Unmask if needed
         if self.masked:
             key = self.masking_key
-            payload = bytes(b ^ key[i % 4] for i, b in enumerate(payload))
+            payload = bytes(b ^ self.masking_key[i % 4] for i, b in enumerate(payload))
 
         # Decode based on opcode
         if self.opcode == WSOpcode.TEXT:
@@ -91,23 +90,87 @@ class WSPFrame:
 
         return payload
 
+    def __str__(self) -> str:
+        payload_preview = self.data
+        # Truncate if payload is too long for readability
+        if isinstance(payload_preview, bytes):
+            payload_preview = payload_preview[:50]
+            payload_preview = payload_preview.hex() + ("..." if len(self.data) > 50 else "")
+        elif isinstance(payload_preview, str):
+            payload_preview = payload_preview[:50] + ("..." if len(self.data) > 50 else "")
+
+        return (
+            f"WSFrame(fin={self.fin}, opcode={self.opcode}, masked={self.masked}, "
+            f"payload_length={self.payload_length}, payload={payload_preview})"
+        )
+
 class WSPortal():
 
     slugs : dict[str, str] = {}
 
-    def __init__(self, slugs, 
-                 client : socket.socket, 
-                 recv_queue : asyncio.Queue,
-                 pong_waiters : asyncio.Future
-                 ):
+    def __init__(self, slugs, client : socket.socket):
         
         self.__client = client
-        self.__recv_queue = recv_queue
-        self.__pong_waiters = pong_waiters
+        self.__recv_queue = asyncio.Queue()
+        self.__pong_waiters = asyncio.Future()
 
         self.__closed = False
         self.slugs = slugs
-        pass
+        
+        asyncio.create_task(self.__reader())
+
+    def __read_exact(self, bufsize : int, timeout : float = None):
+        self.__client.settimeout(timeout)
+        data = b""
+        try:
+            while len(data) < bufsize:
+                chunk = self.__client.recv(bufsize - len(data))
+                if not chunk:
+                    raise ConnectionResetError("Connection Was Reset!")
+                data += chunk
+            return data
+        except socket.timeout:
+            raise ConnectionError("Connection Timed out!")
+
+    def __reader(self):
+        try:
+            while not self.__closed:
+
+                # Get First part of Header
+                header = self.__read_exact(2)
+                length_bytes : bytes = header[1] & 0x7F
+
+                payload_len : int = 0
+
+                # Get payload length
+                if length_bytes == 126:
+                    length_bytes = self.__read_exact(2)
+                    payload_len = int.from_bytes(length_bytes, "big")
+                elif length_bytes == 127:
+                    length_bytes = self.__read_exact(8)
+                    payload_len = int.from_bytes(length_bytes, "big")
+                else:
+                    payload_len = length_bytes
+                    length_bytes = b""
+
+
+                # recieve mask if required
+                has_mask = bool(header[1] & 0x80)
+                mask = self.__read_exact(4) if has_mask else b""
+
+                # recieve body
+                body = self.__read_exact(payload_len)
+
+                # Build WSFrame correctly
+                frame = WSFrame(header + length_bytes + mask + body)
+
+                print(frame)
+                # react based on opcode
+
+                pass
+        except (ConnectionError, OSError):
+            self.__closed = True
+
 
     @property
     def closed(self): return self.__closed
@@ -220,7 +283,7 @@ class WebSocketProtocol(Protocol):
         try:
             raw = base64.b64decode(key, validate=True)
             if len(raw) != 16:
-                raise ValueError
+                raise ValueError("Invalid key")
         except Exception:
             client.send(Response(400).to_bytes())
             return False
@@ -232,11 +295,16 @@ class WebSocketProtocol(Protocol):
             headers={
                 "Upgrade": "websocket",
                 "Connection": "Upgrade",
-                "Sec-WebSocket-Accept": accept_key
+                "Sec-WebSocket-Accept": accept_key,
             }
         )
 
         client.send(resp.to_bytes())
+        
+        current_time = datetime.now().strftime("%H:%M:%S")
+        ip, _ = client.getpeername()
+        print(f"{current_time} {self.inital_req.method} {self.inital_req.base_url} <-WS-> {ip}")
+
         return True
 
     async def handle(self, client : socket.socket, slugs : dict[str, str], endpoints : dict[str, any]):
@@ -249,14 +317,15 @@ class WebSocketProtocol(Protocol):
         :param endpoints: Description
         """
 
-        portal : WSPortal = WSPortal(slugs=slugs)
+        portal : WSPortal = WSPortal(slugs=slugs, client=client)
 
         for endpoint in endpoints:
             if endpoint in WebSocketProtocol.get_target_endpoints():
                 endpoints[endpoint](portal)
                 break
         else:
-            raise FileNotFoundError()
+            raise FileNotFoundError("No Websocket Endpoint Found!")
 
         pass
+
 

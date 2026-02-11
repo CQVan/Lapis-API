@@ -12,6 +12,7 @@ import sys
 from threading import Thread
 from datetime import datetime
 
+from lapis.protocols.websocket import WebSocketProtocol
 from lapis.protocols.http1 import HTTP1Protocol, Request, Response
 from .server_types import BadAPIDirectory, BadConfigError, BadRequest, Protocol, ServerConfig
 
@@ -34,6 +35,7 @@ class Lapis:
             self.cfg = config
 
         self.__register_protocol(HTTP1Protocol)
+        self.__register_protocol(WebSocketProtocol)
 
         self.__paths = self._bake_paths()
 
@@ -183,10 +185,10 @@ class Lapis:
                     request.slugs[dynamic_routes[0].strip("[]")] = part
                     leaf = leaf[dynamic_routes[0]]
                 else:
-                    raise FileNotFoundError()
+                    raise FileNotFoundError("No Path found!")
 
             if len(leaf) == 0:
-                raise FileExistsError()
+                raise FileNotFoundError("No Path found!")
             
             # Finds the correct protocol based on the inital request
             for ProtocolCls in self.__protocols:
@@ -196,7 +198,7 @@ class Lapis:
                     continue
 
                 if not protocol.handshake(client=client):
-                    raise BadRequest()
+                    raise BadRequest("Failed Handshake with protocol!")
 
                 target_endpoints = protocol.get_target_endpoints()
 
@@ -221,7 +223,7 @@ class Lapis:
                 
                 break
             else: # No Protocol was found to be compatible 
-                raise BadRequest()
+                raise BadRequest("No Compatible Protocol Found!")
 
         
         except BadRequest as e:
