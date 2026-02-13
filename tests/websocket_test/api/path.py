@@ -7,6 +7,8 @@ async def WEBSOCKET(portal : WSPortal):
         payload = await portal.recv()
         portal.send(payload=payload)
 
+        await portal.ping(1000)
+
     pass
 
 async def GET(req : Request) -> Response:
