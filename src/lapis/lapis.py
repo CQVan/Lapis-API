@@ -147,7 +147,6 @@ class Lapis:
 
             # Add endpoints
             current_level.update(api_routes)
-
         return result
 
     def _handle_request(self, client: socket.socket):
@@ -207,6 +206,8 @@ class Lapis:
                     for k in target_endpoints 
                     if f"/{k}" in leaf 
                 }
+
+                endpoints = { key.lstrip("/"): value for key, value in endpoints.items() }
 
                 if inspect.iscoroutinefunction(protocol.handle):
                     asyncio.run(protocol.handle(

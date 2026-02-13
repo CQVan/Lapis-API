@@ -149,8 +149,8 @@ class HTTP1Protocol(Protocol):
 
         self.request.slugs = slugs
 
-        if f"/{self.request.method}" in endpoints:
-            response : Response | StreamedResponse = await endpoints[f"/{self.request.method}"](self.request)
+        if self.request.method in endpoints:
+            response : Response | StreamedResponse = await endpoints[self.request.method](self.request)
 
             ip, _ = client.getpeername()
 

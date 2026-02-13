@@ -13,6 +13,16 @@ class WSRecvTimeoutError(Exception):
     The Exception raised when recieve request times out
     """
 
+class WSRecvInvalidFrameError(Exception):
+    """
+    The Exception raised when the recieved frame is invalid
+    """
+
+class WSPortalClosedError(Exception):
+    """
+    The Exception raised when trying to recieve/send from a closed portal
+    """
+
 class WSOpcode(Enum):
     CONTINUATION = 0x0
     TEXT         = 0x1
@@ -110,44 +120,69 @@ class WSPortal():
 
     def __init__(self, slugs, client : socket.socket):
         
-        self.__client = client
-        self.__recv_queue = asyncio.Queue()
-        self.__pong_waiters = asyncio.Future()
+        self.__client : socket.socket = client
+        self.__client.setblocking(False)
+        self.__recv_queue : asyncio.Queue[WSFrame] = asyncio.Queue[WSFrame]()
 
-        self.__closed = False
-        self.slugs = slugs
+        self.__closed : bool = False
+        self.slugs : dict[str, str] = slugs
         
         asyncio.create_task(self.__reader())
 
-    def __read_exact(self, bufsize : int, timeout : float = None):
-        self.__client.settimeout(timeout)
+    def __send_frame(self, opcode: WSOpcode, payload: str | bytes = b"", fin: bool = True):
+        if self.__closed:
+            raise WSPortalClosedError()
+
+        first_byte = (0x80 if fin else 0) | opcode.value
+
+        length = len(payload)
+        header = bytearray()
+        header.append(first_byte)
+
+        if length < 126:
+            header.append(length)
+        elif length < (1 << 16):
+            header.append(126)
+            header.extend(length.to_bytes(2, "big"))
+        else:
+            header.append(127)
+            header.extend(length.to_bytes(8, "big"))
+
+        data = payload if isinstance(payload, bytes) else payload.encode()
+
+        self.__client.sendall(bytes(header) + data)
+
+    async def __read_exact(self, bufsize : int):
+        loop = asyncio.get_running_loop()
         data = b""
         try:
             while len(data) < bufsize:
-                chunk = self.__client.recv(bufsize - len(data))
+                chunk = await loop.sock_recv(self.__client, bufsize - len(data))
                 if not chunk:
                     raise ConnectionResetError("Connection Was Reset!")
                 data += chunk
             return data
-        except socket.timeout:
-            raise ConnectionError("Connection Timed out!")
+        except asyncio.CancelledError:
+            raise
+        except Exception: # Generic catch for socket errors
+            raise ConnectionError("Connection Error or Timeout")
 
-    def __reader(self):
+    async def __reader(self):
         try:
             while not self.__closed:
 
                 # Get First part of Header
-                header = self.__read_exact(2)
+                header : bytes = await self.__read_exact(2)
                 length_bytes : bytes = header[1] & 0x7F
 
                 payload_len : int = 0
 
                 # Get payload length
                 if length_bytes == 126:
-                    length_bytes = self.__read_exact(2)
+                    length_bytes = await self.__read_exact(2)
                     payload_len = int.from_bytes(length_bytes, "big")
                 elif length_bytes == 127:
-                    length_bytes = self.__read_exact(8)
+                    length_bytes = await self.__read_exact(8)
                     payload_len = int.from_bytes(length_bytes, "big")
                 else:
                     payload_len = length_bytes
@@ -155,66 +190,112 @@ class WSPortal():
 
 
                 # recieve mask if required
-                has_mask = bool(header[1] & 0x80)
-                mask = self.__read_exact(4) if has_mask else b""
+                has_mask : bool = bool(header[1] & 0x80)
+                mask : bytes = await self.__read_exact(4) if has_mask else b""
 
                 # recieve body
-                body = self.__read_exact(payload_len)
+                body : bytes = await self.__read_exact(payload_len)
 
                 # Build WSFrame correctly
-                frame = WSFrame(header + length_bytes + mask + body)
+                frame : WSFrame = WSFrame(header + length_bytes + mask + body)
 
-                print(frame)
                 # react based on opcode
-
+                if frame.opcode == WSOpcode.PING:
+                    if not frame.fin: # Cannot send fragmented control frames
+                        self.close(1002)
+                    else: 
+                        self.__send_frame(
+                            opcode=WSOpcode.PONG,
+                            payload=frame.data if isinstance(frame.data, bytes) else frame.data.encode()
+                        )
+                    pass
+                elif frame.opcode == WSOpcode.CLOSE:
+                    self.close()
+                    pass
+                elif frame.opcode == WSOpcode.PONG:
+                    if not self.__pong_waiters.done():
+                        self.__pong_waiters.set_result(True)
+                else:
+                    await self.__recv_queue.put(frame)
+                    pass
                 pass
-        except (ConnectionError, OSError):
-            self.__closed = True
-
+        except:
+            self.close(1011)
 
     @property
     def closed(self): return self.__closed
 
-    async def recv(timeout : float = None) -> str | bytes:
+    async def recv(self, timeout: float = None) -> str | bytes:
         """
         Recieves a full frame from the client
 
-        If the frame is fragmented, WSPortal.recv() will combine the fragments into the full frame
-        
+        If the frame is fragmented, WSPortal.recv() will combine the fragments into a full payload
+
         :param timeout: If specified, the max time before server raises a WSRecvTimeoutError
         :type timeout: float
         :return: The data of the full frame
         :rtype: str | bytes
         """
 
-        pass
+        if self.closed:
+            raise WSPortalClosedError("Tried to recieve from a closed portal!")
 
-    async def recv_frag(timeout : float = None) -> str | bytes:
-        """
-        Recieves a single frame from the client
+        try:
+            frame: WSFrame = await asyncio.wait_for(self.__recv_queue.get(), timeout=timeout)
+            
+            if frame.fin: # Unfragmented frame
+                current_time = datetime.now().strftime("%H:%M:%S")
+                ip, _ = self.__client.getpeername()
 
-        This is different from WSPortal.recv where if the client sends a fragmented frame,
-        it will only capture the first fragment of the frame
-        
-        :param timeout: If specified, the max time before server raises a WSRecvTimeoutError
-        :type timeout: float
-        :return: The data of the first frame
-        :rtype: str | bytes
-        """
+                print(f"{current_time} Server <-WS- {ip}")
+                return frame.data
 
+            result = frame.data
+            is_text = isinstance(result, str)
+            
+            while True:
+                frame = await asyncio.wait_for(self.__recv_queue.get(), timeout=timeout)
 
-        pass
+                if frame.opcode != WSOpcode.CONTINUATION:
+                    self.close(1002)
+                    raise WSRecvInvalidFrameError("Expected continuation frame")
 
-    def send(payload : str | bytes):
+                result += frame.data if is_text else frame.data.decode()
+
+                if frame.fin:
+                    break
+
+            current_time = datetime.now().strftime("%H:%M:%S")
+            ip, _ = self.__client.getpeername()
+
+            print(f"{current_time} Server <-WS- {ip}")
+
+            return result
+
+        except asyncio.TimeoutError:
+            raise WSRecvTimeoutError()
+
+    def send(self, payload : str | bytes):
         """
         Sends a payload for the client to recieve
         
         :param payload: Data to send to the client
         :type payload: str | bytes
         """
-        pass
 
-    async def ping(timeout : float) -> bool:
+        if self.closed:
+            raise WSPortalClosedError("Tried to send through a closed portal!")
+
+        opcode = WSOpcode.BINARY if isinstance(payload, bytes) else WSOpcode.TEXT
+
+        self.__send_frame(opcode=opcode, payload=payload)
+
+        current_time = datetime.now().strftime("%H:%M:%S")
+        ip, _ = self.__client.getpeername()
+
+        print(f"{current_time} Server -WS-> {ip}")
+
+    async def ping(self, timeout : float) -> bool:
         """
         Pings client to confirm that client is still connected
         
@@ -223,7 +304,38 @@ class WSPortal():
         :return: If client returns with a *Pong* client frame
         :rtype: bool
         """
-        pass
+
+        self.__pong_waiters = asyncio.get_running_loop().create_future()
+
+        try:
+            self.__send_frame(WSOpcode.PING)
+
+            result = await asyncio.wait_for(asyncio.shield(self.__pong_waiters), timeout=timeout)
+            return result
+        except asyncio.TimeoutError:
+            return False
+        
+        finally:
+            self.__pong_waiters = None
+
+    def close(self, code : int = 1000):
+        if self.closed:
+            return
+        
+        self.__send_frame(
+            opcode=WSOpcode.CLOSE,
+            payload=code.to_bytes(2,"big")
+        )
+        
+        self.__closed = True
+        self.__client.close()
+
+        current_time = datetime.now().strftime("%H:%M:%S")
+        ip, _ = self.__client.getpeername()
+
+        arrow = "-X->" if code == 1000 else "-!X!->"
+
+        print(f"{current_time} Server {arrow} {ip}")
 
 class WebSocketProtocol(Protocol):
 
@@ -275,6 +387,8 @@ class WebSocketProtocol(Protocol):
             client.send(resp.to_bytes())
             return False
 
+        # Create accept key
+
         key = req.headers.get("Sec-WebSocket-Key")
         if not key:
             client.send(Response(400).to_bytes())
@@ -290,6 +404,7 @@ class WebSocketProtocol(Protocol):
 
         accept_key = self.__compute_accept_key(key)
 
+        # Send protocol transfer success message
         resp = Response(
             status_code=101,
             headers={
@@ -317,15 +432,11 @@ class WebSocketProtocol(Protocol):
         :param endpoints: Description
         """
 
-        portal : WSPortal = WSPortal(slugs=slugs, client=client)
-
         for endpoint in endpoints:
-            if endpoint in WebSocketProtocol.get_target_endpoints():
-                endpoints[endpoint](portal)
-                break
+            if endpoint in self.get_target_endpoints():
+                portal : WSPortal = WSPortal(slugs=slugs, client=client)
+                await endpoints[endpoint](portal)
+                return
         else:
             raise FileNotFoundError("No Websocket Endpoint Found!")
-
-        pass
-
 
