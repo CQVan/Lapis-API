@@ -53,18 +53,44 @@ class WSFrame():
 
     @property
     def fin(self) -> bool:
+        """
+        Returns if this frame is the final frame of the payload
+
+        Used for fragmented data frames
+        
+        :rtype: bool
+        """
+
         return bool(self.__data[0] & 0x80)
 
     @property
     def opcode(self) -> WSOpcode:
+        """
+        Returns the frame's opcode; the operation the frame is supposed to communicate
+
+        :rtype: WSOpcode
+        """
+
         return WSOpcode(self.__data[0] & 0x0F)
 
     @property
     def masked(self) -> bool:
+        """
+        Returns of the payload of the frame is masked
+        
+        :rtype: bool
+        """
+
         return bool(self.__data[1] & 0x80)
 
     @property
     def payload_length(self) -> int:
+        """
+        Returns the length of the payload specified in the frame header
+                
+        :rtype: int
+        """
+
         length = self.__data[1] & 0x7F
 
         if length < 126:
@@ -73,7 +99,13 @@ class WSFrame():
             return int.from_bytes(self.__data[2:4], "big")
         return int.from_bytes(self.__data[2:10], "big")
 
-    def _header_length(self) -> int:
+    def __header_length(self) -> int:
+        """
+        Returns the length of the header of the frame
+        
+        :rtype: int
+        """
+
         length = self.__data[1] & 0x7F
 
         if length < 126:
@@ -84,15 +116,30 @@ class WSFrame():
 
     @property
     def masking_key(self) -> bytes | None:
+        """
+        Returns the masking key of the frame used to mask the payload
+
+        returns None if the frame isn't masked
+
+        :rtype: bytes | None
+        """
+
         if not self.masked:
             return None
 
-        start = self._header_length()
+        start = self.__header_length()
         return self.__data[start:start + 4]
 
     @property
     def data(self) -> str | bytes:
-        header_len = self._header_length()
+        """
+        Returns the payload data of the frame
+
+        returns either string or bytes depending on the opcode
+        
+        :rtype: str | bytes
+        """
+        header_len = self.__header_length()
         offset = header_len + (4 if self.masked else 0)
 
         payload = self.__data[offset:offset + self.payload_length]
@@ -111,6 +158,12 @@ class WSFrame():
         return payload
 
     def __str__(self) -> str:
+        """
+        Returns a stringified version of WSFrame for debugging purposes
+        
+        :rtype: str
+        """
+
         payload_preview = self.data
         # Truncate if payload is too long for readability
         if isinstance(payload_preview, bytes):
@@ -346,6 +399,13 @@ class WSPortal():
             self.__pong_waiters = None
 
     def close(self, code : int = 1000):
+        """
+        Closes the connection between the server and client using the given close code
+        
+        :param code: The close code the server will send to the client (default 1000)
+        :type code: int
+        """
+
         if self.closed:
             return
 

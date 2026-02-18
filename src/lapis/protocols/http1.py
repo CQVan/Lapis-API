@@ -2,6 +2,7 @@
 Module containing the HTTP 1/1.1 protocol implementation for Lapis server
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 from http import HTTPMethod, HTTPStatus
 import socket
@@ -10,9 +11,18 @@ from urllib.parse import parse_qsl, urlparse
 
 from lapis.server_types import BadRequest, Protocol
 
+@dataclass
+class RequestHeader:
+    """
+    Utility class to store the request header data
+    """
+    method: HTTPMethod
+    base_url: str
+    query_params: dict[str, str]
+    headers: dict[str, str]
+    protocol: str
 
 class Request:
-
     """
     The object class for handling HTTP 1/1.1 requests from clients
     """
@@ -26,28 +36,21 @@ class Request:
         if "\r\n\r\n" not in text:
             raise BadRequest("Malformed HTTP request")
 
-        head, body = text.split("\r\n\r\n", 1)
+        head, self.__body = text.split("\r\n\r\n", 1)
         lines = head.split("\r\n")
 
-        method, url, protocol = lines[0].split(" ", 2)
-        self.method = HTTPMethod[method.upper()]
-
+        method_str, url, protocol = lines[0].split(" ", 2)
         if protocol not in ("HTTP/1.0", "HTTP/1.1"):
             raise BadRequest("Unsupported protocol")
 
-        self.protocol = protocol
-        self.headers = {}
-        self.cookies = {}
-
-        self.slugs = {}
-
+        headers_dict = {}
         for line in lines[1:]:
             if ":" not in line:
                 raise BadRequest("Malformed header")
             key, value = line.split(":", 1)
-            self.headers[key.strip()] = value.strip()
+            headers_dict[key.strip()] = value.strip()
 
-        if protocol == "HTTP/1.1" and "Host" not in self.headers:
+        if protocol == "HTTP/1.1" and "Host" not in headers_dict:
             raise BadRequest("Missing Host header")
 
         try:
@@ -55,9 +58,60 @@ class Request:
         except ValueError as exc:
             raise BadRequest("Bad URL") from exc
 
-        self.base_url = parsed.path
-        self.query_params = dict(parse_qsl(parsed.query))
-        self.body = body
+        self.__header_data = RequestHeader(
+            method=HTTPMethod[method_str.upper()],
+            base_url=parsed.path,
+            query_params=dict(parse_qsl(parsed.query)),
+            headers=headers_dict,
+            protocol=protocol
+        )
+
+        self.cookies = {}
+        self.slugs = {}
+
+    @property
+    def method(self) -> HTTPMethod:
+        """
+        Returns the HTTP method (e.g., GET, POST) of the request.
+        """
+        return self.__header_data.method
+
+    @property
+    def protocol(self) -> str:
+        """
+        Returns the HTTP protocol version (e.g., 'HTTP/1.1').
+        """
+        return self.__header_data.protocol
+
+    @property
+    def headers(self) -> dict[str, str]:
+        """
+        Returns a dictionary of the HTTP headers sent by the client.
+        Keys are case-sensitive as parsed from the request.
+        """
+        return self.__header_data.headers
+
+    @property
+    def base_url(self) -> str:
+        """
+        Returns the path component of the requested URL (e.g., '/api/users').
+        """
+        return self.__header_data.base_url
+
+    @property
+    def query_params(self) -> dict[str, str]:
+        """
+        Returns a dictionary containing the URL query string parameters.
+        """
+        return self.__header_data.query_params
+
+    @property
+    def body(self) -> str:
+        """
+        Returns the raw entity body of the HTTP request as a string.
+        """
+        return self.__body
+
 
 class Response:
 
