@@ -3,7 +3,7 @@ requires = ["hatchling >= 1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "Lapis"
+name = "lapis-api"
 version = "0.2.0"
 description = "An organized way to create REST APIs"
 readme = "README.md"
