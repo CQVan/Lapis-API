@@ -37,6 +37,9 @@ class Lapis:
     __taken_endpoints: list[str] = []
     __protocols: list[type[Protocol]] = []
 
+    __slug_pattern = re.compile(r"\[[^\]]+\]")
+    __path_pattern = re.compile(r"^\/([a-zA-Z0-9._-]+)(\/[a-zA-Z0-9._-]+)*$")
+
     __running: bool = False
 
     def __init__(self, config: ServerConfig | None = None):
@@ -110,6 +113,19 @@ class Lapis:
             if p.is_dir() and p.name.startswith("[") and p.name.endswith("]")
         ]
 
+    def __validate_path(self, relative_path: pathlib.Path):
+        posix_rel = relative_path.as_posix()
+
+        slugs = self.__slug_pattern.findall(posix_rel)
+        if len(slugs) != len(set(slugs)):
+            raise BadAPIDirectory(f"Endpoint contains duplicate slugs: {posix_rel}")
+
+        clean_path_str = relative_path.with_suffix("").as_posix()
+        deslugged_path = "/" + self.__slug_pattern.sub("s", clean_path_str)
+
+        if not self.__path_pattern.match(deslugged_path):
+            raise BadAPIDirectory(f"Invalid characters or format in path: {posix_rel}")
+
     def _bake_paths(self):
         server_path = pathlib.Path(sys.argv[0]).resolve()
         # Simplified path joining
@@ -125,9 +141,6 @@ class Lapis:
         if not root.exists():
             raise BadAPIDirectory(f'api directory "{root}" does not exist')
 
-        slug_pattern = re.compile(r"\[[^\]]+\]")
-        path_pattern = re.compile(r"^\/([a-zA-Z0-9._-]+)(\/[a-zA-Z0-9._-]+)*$")
-
         self.__paths = {}
         endpoint_paths: dict[str, pathlib.Path] = {}
 
@@ -137,22 +150,18 @@ class Lapis:
 
             relative_path = path.relative_to(root)
 
-            posix_rel = relative_path.as_posix()
-            normalized_path = slug_pattern.sub("[slug]", posix_rel)
+            # Will raise exception if invalid path
+            self.__validate_path(relative_path)
+
+            normalized_path = self.__slug_pattern.sub(
+                "[slug]", relative_path.as_posix()
+            )
 
             if normalized_path in endpoint_paths:
                 raise BadAPIDirectory(
                     f"Found overlapping [slug] endpoints:\n"
                     f'  - "{relative_path}"\n'
                     f'  - "{endpoint_paths[normalized_path]}"'
-                )
-
-            clean_path_str = relative_path.with_suffix("").as_posix()
-            deslugged_path = "/" + slug_pattern.sub("s", clean_path_str)
-
-            if not path_pattern.match(deslugged_path):
-                raise BadAPIDirectory(
-                    f"Invalid characters or format in path: {posix_rel}"
                 )
 
             endpoint_paths[normalized_path] = relative_path
@@ -175,32 +184,47 @@ class Lapis:
     def __has_endpoint_path(
         self, base_url: str
     ) -> tuple[dict[str, any] | None, dict[str, str]]:
-        # Digs through api cache map to find the correct endpoint directory
-        slugs = {}
-        path = pathlib.Path(f"{self.cfg.api_directory}{base_url}")
-        parts: list[str] = path.relative_to(self.cfg.api_directory).parts
+        # Convert the URL into parts, ignoring the leading slash
+        path_parts = pathlib.Path(base_url.lstrip("/")).parts
 
-        leaf: dict = self.__paths
-        for part in parts:
-            if part in leaf:
-                leaf = leaf[part]
-                continue
+        # Start the recursive search
+        return self._search_tree(self.__paths, path_parts, {})
 
-            # checks if there are dynamic routes available
-            dynamic_routes: list[str] = list(
-                {key for key in leaf if key.startswith("[") and key.endswith("]")}
+    def _search_tree(
+        self, current_level: dict, remaining_parts: tuple[str, ...], slugs: dict
+    ) -> tuple[dict | None, dict]:
+
+        # Base case
+        if not remaining_parts:
+            return (current_level, slugs) if current_level else (None, {})
+
+        part = remaining_parts[0]
+        next_parts = remaining_parts[1:]
+
+        # Check for if no slugs
+        if part in current_level:
+            result, captured_slugs = self._search_tree(
+                current_level[part], next_parts, slugs
             )
+            if result is not None:
+                return result, captured_slugs
 
-            if len(dynamic_routes) == 1:
-                slugs[dynamic_routes[0].strip("[]")] = part
-                leaf = leaf[dynamic_routes[0]]
-            else:
-                return (None, {})
+        # There are slugs
+        dynamic_keys = [
+            k for k in current_level if k.startswith("[") and k.endswith("]")
+        ]
 
-        if len(leaf) == 0:
-            return (None, {})
+        for key in dynamic_keys:
+            slug_name = key.strip("[]")
+            new_slugs = {**slugs, slug_name: part}
 
-        return (leaf, slugs)
+            result, captured_slugs = self._search_tree(
+                current_level[key], next_parts, new_slugs
+            )
+            if result is not None:
+                return result, captured_slugs
+
+        return None, {}
 
     def _handle_request(self, client: socket.socket):
         data = client.recv(self.cfg.max_request_size)
