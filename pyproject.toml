@@ -27,4 +27,5 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/CQVan/Lapis"
+Wiki = "https://github.com/CQVan/Lapis/wiki"
 Issues = "https://github.com/CQVan/Lapis/issues"
