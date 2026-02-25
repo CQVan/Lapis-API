@@ -212,7 +212,7 @@ class WSPortal:
         self.inital_req: Request = None
 
         self.__recv_queue: asyncio.Queue[WSFrame] = asyncio.Queue[WSFrame]()
-        self.__pong_waiters = None
+        self.__pong_waiters = set()
 
         self.__closed: bool = False
         self.slugs: dict[str, str] = slugs
@@ -314,8 +314,9 @@ class WSPortal:
                 elif frame.opcode == WSOpcode.CLOSE:
                     self.close()
                 elif frame.opcode == WSOpcode.PONG:
-                    if not self.__pong_waiters.done():
-                        self.__pong_waiters.set_result(True)
+                    for waiter in self.__pong_waiters:
+                        if not waiter.done():
+                            waiter.set_result(True)
                 else:
                     await self.__recv_queue.put(frame)
         except Exception:
@@ -411,20 +412,17 @@ class WSPortal:
         :rtype: bool
         """
 
-        self.__pong_waiters = asyncio.get_running_loop().create_future()
+        loop = asyncio.get_running_loop()
+        waiter = loop.create_future()
+        self.__pong_waiters.add(waiter)
 
         try:
             self.__send_frame(WSOpcode.PING)
-
-            result = await asyncio.wait_for(
-                asyncio.shield(self.__pong_waiters), timeout=timeout
-            )
-            return result
+            return await asyncio.wait_for(waiter, timeout=timeout)
         except asyncio.TimeoutError:
             return False
-
         finally:
-            self.__pong_waiters = None
+            self.__pong_waiters.discard(waiter)
 
     def close(self, code: int = 1000):
         """
