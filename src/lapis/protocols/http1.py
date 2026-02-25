@@ -13,6 +13,13 @@ from lapis.server_types import BadRequest, Protocol
 
 
 @dataclass
+class HTTP1Config:
+    """
+    The class containing all configuration settings for a Lapis HTTP1.X connection
+    """
+
+
+@dataclass
 class RequestHeader:
     """
     Utility class to store the request header data
@@ -207,8 +214,8 @@ class HTTP1Protocol(Protocol):
 
     request: Request = None
 
-    def get_config_key(self):
-        return "http1.x_config"
+    def __init__(self, config):
+        self.__config = HTTP1Config(**config)
 
     def get_target_endpoints(self) -> list[str]:
         return [method.name for method in HTTPMethod]

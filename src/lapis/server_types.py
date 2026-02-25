@@ -116,13 +116,19 @@ class Protocol(ABC):
     """
 
     @abstractmethod
-    def get_config_key(self) -> str:
+    def __init__(self, config: dict[str, any]):
+        pass
+
+    @classmethod
+    def get_config_key(cls) -> str:
         """
         Gathers the keyword used to get the protocol's config from ServerConfig.protocol_configs
 
         :return: Description
         :rtype: str
         """
+
+        return cls.__module__
 
     @abstractmethod
     def get_target_endpoints(self) -> list[str]:

@@ -4,6 +4,7 @@ The Module containing Lapis' native WebSocket Protocol Handler
 
 import asyncio
 import binascii
+from dataclasses import dataclass
 from datetime import datetime
 import socket
 import base64
@@ -12,6 +13,13 @@ from enum import Enum
 
 from lapis.server_types import Protocol
 from lapis.protocols.http1 import Request, Response
+
+
+@dataclass
+class WSConfig:
+    """
+    The class containing all configuration settings for a Lapis WebSocket connection
+    """
 
 
 class WSRecvTimeoutError(Exception):
@@ -447,17 +455,14 @@ class WebSocketProtocol(Protocol):
     The protocol created to handle websocket connections between server and client
     """
 
-    __WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-
-    def __init__(self):
+    def __init__(self, config: dict[str, any]):
+        self.__WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+        self.__config = WSConfig(**config)
         self.inital_req: Request = None
 
     def __compute_accept_key(self, sec_key: str) -> str:
         sha1 = hashlib.sha1((sec_key + self.__WS_GUID).encode("ascii")).digest()
         return base64.b64encode(sha1).decode("ascii")
-
-    def get_config_key(self):
-        return "websocket13_config"
 
     def get_target_endpoints(self) -> list[str]:
         """

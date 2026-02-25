@@ -247,7 +247,11 @@ class Lapis:
 
             # Finds the correct protocol based on the inital request
             for protocol_cls in self.__protocols:
-                protocol: Protocol = protocol_cls()
+                protocol_config = ServerConfig.protocol_configs.get(
+                    protocol_cls.get_config_key(), {}
+                )
+
+                protocol: Protocol = protocol_cls(config=protocol_config)
 
                 if not protocol.identify(initial_data=data):
                     continue
