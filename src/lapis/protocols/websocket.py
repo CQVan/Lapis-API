@@ -10,6 +10,7 @@ import socket
 import base64
 import hashlib
 from enum import Enum
+import sys
 
 from lapis.server_types import Protocol
 from lapis.protocols.http1 import Request, Response
@@ -20,6 +21,13 @@ class WSConfig:
     """
     The class containing all configuration settings for a Lapis WebSocket connection
     """
+
+    max_connections: int = None
+    max_frame_size: int = None
+    max_fragment_count: int = None
+
+    auto_ping_interval: float = None
+    auto_ping_timeout: float = 30.0
 
 
 class WSRecvTimeoutError(Exception):
@@ -203,11 +211,22 @@ class WSPortal:
     """
 
     slugs: dict[str, str] = {}
+    __current_fragment_count: int = 0
+    __is_capturing_fragments: bool = False
 
-    def __init__(self, slugs, client: socket.socket):
+    @property
+    def closed(self):
+        """
+        Returns if the connection between the client and server is open
+        """
+        return self.__closed
+
+    def __init__(self, slugs, config, client: socket.socket):
 
         self.__client: socket.socket = client
         self.__client.setblocking(False)
+
+        self.__config = config
 
         self.inital_req: Request = None
 
@@ -218,6 +237,9 @@ class WSPortal:
         self.slugs: dict[str, str] = slugs
 
         asyncio.create_task(self.__reader())
+
+        if self.__config.auto_ping_interval != None:
+            asyncio.create_task(self.__auto_ping())
 
     def __send_frame(
         self, opcode: WSOpcode, payload: str | bytes = b"", fin: bool = True
@@ -292,6 +314,14 @@ class WSPortal:
                 has_mask: bool = bool(header[1] & 0x80)
                 mask: bytes = await self.__read_exact(4) if has_mask else b""
 
+                if (
+                    self.__config.max_frame_size != None
+                    and len(header) + len(length_bytes) + len(mask) + payload_len
+                    > self.__config.max_frame_size
+                ):
+                    self.close(1009)
+                    return
+
                 # recieve body
                 body: bytes = await self.__read_exact(payload_len)
 
@@ -302,6 +332,7 @@ class WSPortal:
                 if frame.opcode == WSOpcode.PING:
                     if not frame.fin:  # Cannot send fragmented control frames
                         self.close(1002)
+                        return
                     else:
                         self.__send_frame(
                             opcode=WSOpcode.PONG,
@@ -313,22 +344,57 @@ class WSPortal:
                         )
                 elif frame.opcode == WSOpcode.CLOSE:
                     self.close()
+                    return
                 elif frame.opcode == WSOpcode.PONG:
                     for waiter in self.__pong_waiters:
                         if not waiter.done():
                             waiter.set_result(True)
                 else:
+                    if frame.opcode in (WSOpcode.TEXT, WSOpcode.BINARY):
+                        if self.__is_capturing_fragments:
+                            self.close(1002)
+                            return
+
+                        if not frame.fin:
+                            self.__is_capturing_fragments = True
+                            self.__current_fragment_count = 1
+
+                    elif frame.opcode == WSOpcode.CONTINUATION:
+                        if not self.__is_capturing_fragments:
+                            self.close(1002)
+                            return
+
+                        self.__current_fragment_count += 1
+
+                        if self.__current_fragment_count > (
+                            self.__config.max_fragment_count or sys.maxsize
+                        ):
+                            self.close(1009)
+                            return
+
+                        if frame.fin:
+                            self.__is_capturing_fragments = False
+                            self.__current_fragment_count = 0
+
                     await self.__recv_queue.put(frame)
         except Exception:
             self.close(1011)
             raise
 
-    @property
-    def closed(self):
+    async def __auto_ping(self):
         """
-        Returns if the connection between the client and server is open
+        Utility function used to automatically ping client at intervals specified in config
         """
-        return self.__closed
+
+        while not self.__closed:
+            await asyncio.sleep(self.__config.auto_ping_interval)
+
+            if self.__closed:
+                break
+
+            if not await self.ping(timeout=self.__config.auto_ping_timeout):
+                self.close(1002)
+                break
 
     async def recv(self, timeout: float = None) -> str | bytes:
         """
@@ -440,6 +506,8 @@ class WSPortal:
         self.__closed = True
         self.__client.close()
 
+        WebSocketProtocol.__current_connections -= 1
+
         current_time = datetime.now().strftime("%H:%M:%S")
         ip, _ = self.__client.getpeername()
 
@@ -452,6 +520,8 @@ class WebSocketProtocol(Protocol):
     """
     The protocol created to handle websocket connections between server and client
     """
+
+    __current_connections: int = 0
 
     def __init__(self, config: dict[str, any]):
         self.__WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -482,6 +552,13 @@ class WebSocketProtocol(Protocol):
 
     def handshake(self, client) -> bool:
         req = self.inital_req
+
+        if (
+            self.__config.max_connections != None
+            and WebSocketProtocol.__current_connections >= self.__config.max_connections
+        ):
+            client.send(Response(503).to_bytes())
+            return False
 
         if req.method != "GET":
             client.send(Response(400).to_bytes())
@@ -551,7 +628,10 @@ class WebSocketProtocol(Protocol):
 
         for endpoint in endpoints:
             if endpoint in self.get_target_endpoints():
-                portal: WSPortal = WSPortal(slugs=slugs, client=client)
+                portal: WSPortal = WSPortal(
+                    slugs=slugs, config=self.__config, client=client
+                )
+                WebSocketProtocol.__current_connections += 1
                 await endpoints[endpoint](portal)
                 return
 
